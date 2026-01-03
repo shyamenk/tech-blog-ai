@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.api import research, outline, explain, draft, seo, knowledge
+from app.api import research, outline, explain, draft, seo, knowledge, workflow
 
 
 @asynccontextmanager
@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(draft.router, prefix=settings.api_v1_prefix, tags=["Draft"])
     app.include_router(seo.router, prefix=settings.api_v1_prefix, tags=["SEO"])
     app.include_router(knowledge.router, prefix=settings.api_v1_prefix, tags=["Knowledge"])
+    app.include_router(workflow.router, prefix=settings.api_v1_prefix, tags=["Workflow"])
 
     return app
 

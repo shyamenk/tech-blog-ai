@@ -20,24 +20,56 @@ Tech Blog AI is an AI-powered technical content assistant that helps developers 
 
 ## Development Commands
 
+### Using Makefile (Recommended)
+
 ```bash
-# Start all services
-docker-compose up -d
+make install     # Create venv and install dependencies
+make dev         # Install with dev dependencies
+make test        # Run all tests
+make test-cov    # Run tests with coverage report
+make lint        # Run linters (ruff, mypy)
+make format      # Format code (black, ruff)
+make run         # Run the app locally
+make docker-up   # Start Docker services
+make docker-down # Stop Docker services
+make clean       # Clean up generated files
+```
 
-# Check container status
-docker-compose ps
+### Manual Commands
 
-# View application logs
-docker-compose logs -f app
-
-# Stop all services
-docker-compose down
-
-# Run the FastAPI app directly (outside Docker)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Install dependencies with UV
+```bash
+# Create virtual environment and install dependencies
+uv venv
 uv pip install -r requirements.txt
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Run the FastAPI app locally
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Run tests
+pytest tests/ -v
+
+# Run tests with coverage
+pytest tests/ --cov=app --cov-report=term-missing
+
+# Run a single test file
+pytest tests/test_api/test_health.py -v
+
+# Format and lint
+black app/ tests/
+ruff check app/ tests/
+mypy app/
+```
+
+### Docker Commands
+
+```bash
+docker-compose up -d      # Start all services
+docker-compose ps         # Check container status
+docker-compose logs -f app # View application logs
+docker-compose down       # Stop all services
 ```
 
 **API Documentation**: http://localhost:8000/docs (when running)

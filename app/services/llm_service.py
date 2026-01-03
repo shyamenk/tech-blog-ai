@@ -20,7 +20,7 @@ class LLMService:
 
         # Initialize the chat model
         self.chat_model = ChatGoogleGenerativeAI(
-            model="gemini-pro",
+            model="gemini-2.5-flash",
             google_api_key=self.api_key,
             temperature=0.7,
             max_output_tokens=4096,

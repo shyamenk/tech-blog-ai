@@ -1,4 +1,4 @@
-"""RAG (Retrieval Augmented Generation) service using ChromaDB."""
+"""RAG (Retrieval Augmented Generation) service using ChromaDB and PostgreSQL."""
 
 import uuid
 import hashlib
@@ -12,6 +12,7 @@ from app.db.chroma import (
     TECH_BLOG_KNOWLEDGE,
     USER_CONTENT,
 )
+from app.db.repositories import KnowledgeDocumentRepository
 
 
 class RAGService:
@@ -134,6 +135,24 @@ class RAGService:
                 "message": f"Failed to add to ChromaDB: {str(e)}",
             }
 
+        # Also save metadata to PostgreSQL for persistence
+        try:
+            await KnowledgeDocumentRepository.create(
+                title=title,
+                content=content[:5000],  # Store first 5000 chars
+                embedding_id=doc_id,
+                source_url=source_url,
+                document_type=document_type,
+                metadata={
+                    "chunks_count": len(chunks),
+                    "collection": collection_name,
+                    **(metadata or {}),
+                },
+            )
+        except Exception as e:
+            # PostgreSQL save failed, but ChromaDB succeeded
+            print(f"PostgreSQL save failed (ChromaDB succeeded): {e}")
+
         return {
             "id": doc_id,
             "title": title,
@@ -241,6 +260,12 @@ class RAGService:
             if results and results.get("ids"):
                 chunk_ids = results["ids"]
                 collection.delete(ids=chunk_ids)
+
+                # Also delete from PostgreSQL
+                try:
+                    await KnowledgeDocumentRepository.delete_by_embedding_id(doc_id)
+                except Exception as e:
+                    print(f"PostgreSQL delete failed: {e}")
 
                 return {
                     "id": doc_id,

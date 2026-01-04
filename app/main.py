@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.api import research, outline, explain, draft, seo, knowledge, workflow
+from app.db.postgres import PostgresPool
+from app.db.redis import RedisClient
 
 
 @asynccontextmanager
@@ -18,10 +20,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print(f"Starting {settings.app_name} v{settings.app_version}")
     print(f"Debug mode: {settings.debug}")
 
+    # Initialize database connections
+    try:
+        await PostgresPool.create_pool()
+        print("PostgreSQL connection pool initialized")
+    except Exception as e:
+        print(f"PostgreSQL not available: {e}")
+
+    try:
+        await RedisClient.create_client()
+        print("Redis client initialized")
+    except Exception as e:
+        print(f"Redis not available: {e}")
+
     yield
 
-    # Shutdown
+    # Shutdown - cleanup connections
     print("Shutting down...")
+    try:
+        await PostgresPool.close_pool()
+        print("PostgreSQL pool closed")
+    except Exception:
+        pass
+
+    try:
+        await RedisClient.close_client()
+        print("Redis client closed")
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:

@@ -2,6 +2,7 @@
 
 from typing import TypedDict, Optional, Annotated
 from operator import add
+from uuid import UUID
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -9,6 +10,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from app.services.llm_service import get_llm_service
 from app.services.content_service import get_content_service
 from app.services.research_service import get_research_service
+from app.db.repositories import BlogPostRepository, ResearchSessionRepository
 
 
 class BlogState(TypedDict):
@@ -287,6 +289,49 @@ def create_blog_workflow() -> StateGraph:
 blog_workflow = create_blog_workflow().compile()
 
 
+async def save_workflow_results(
+    topic: str,
+    final_state: dict,
+    niche: Optional[str] = None,
+    target_audience: str = "intermediate",
+) -> dict:
+    """Save workflow results to PostgreSQL."""
+    saved_ids = {}
+
+    # Save research session
+    if final_state.get("research_findings"):
+        try:
+            research_result = await ResearchSessionRepository.create(
+                topic=topic,
+                findings=final_state["research_findings"],
+                sources=final_state["research_findings"].get("sources", []),
+            )
+            saved_ids["research_session_id"] = str(research_result.get("id", ""))
+        except Exception as e:
+            print(f"Failed to save research session: {e}")
+
+    # Save blog post
+    if final_state.get("final_content") or final_state.get("draft"):
+        content_data = final_state.get("final_content") or final_state.get("draft") or {}
+        try:
+            blog_result = await BlogPostRepository.create(
+                title=content_data.get("title", topic),
+                content=content_data.get("content", ""),
+                outline=final_state.get("outline"),
+                niche=niche,
+                target_audience=target_audience,
+                word_count=content_data.get("word_count"),
+                seo_metadata=final_state.get("seo_metadata"),
+                status="completed" if final_state.get("status") == "completed" else "draft",
+            )
+            saved_ids["blog_post_id"] = str(blog_result.get("id", ""))
+            saved_ids["slug"] = blog_result.get("slug", "")
+        except Exception as e:
+            print(f"Failed to save blog post: {e}")
+
+    return saved_ids
+
+
 async def run_blog_workflow(
     topic: str,
     niche: Optional[str] = None,
@@ -294,6 +339,7 @@ async def run_blog_workflow(
     word_count: int = 2000,
     tone: str = "conversational",
     include_code_examples: bool = True,
+    save_to_db: bool = True,
 ) -> dict:
     """Run the complete blog creation workflow."""
 
@@ -321,7 +367,7 @@ async def run_blog_workflow(
     # Run the workflow
     final_state = await blog_workflow.ainvoke(initial_state)
 
-    return {
+    result = {
         "status": final_state.get("status", "unknown"),
         "topic": topic,
         "messages": final_state.get("messages", []),
@@ -332,3 +378,15 @@ async def run_blog_workflow(
         "seo_metadata": final_state.get("seo_metadata"),
         "error": final_state.get("error"),
     }
+
+    # Save to PostgreSQL if enabled
+    if save_to_db and final_state.get("status") == "completed":
+        saved_ids = await save_workflow_results(
+            topic=topic,
+            final_state=final_state,
+            niche=niche,
+            target_audience=target_audience,
+        )
+        result["saved"] = saved_ids
+
+    return result

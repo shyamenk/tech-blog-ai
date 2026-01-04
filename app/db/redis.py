@@ -1,12 +1,21 @@
-"""Redis connection management."""
+"""Redis connection management and caching utilities."""
 
-from typing import Optional, Any
+from typing import Optional, Any, Callable
+from functools import wraps
 import json
+import hashlib
 
 import redis.asyncio as redis
 from redis.asyncio import Redis
 
 from app.config import get_settings
+
+
+# Cache TTL constants (in seconds)
+CACHE_TTL_SHORT = 300  # 5 minutes
+CACHE_TTL_MEDIUM = 1800  # 30 minutes
+CACHE_TTL_LONG = 3600  # 1 hour
+CACHE_TTL_DAY = 86400  # 24 hours
 
 
 class RedisClient:
@@ -76,3 +85,81 @@ async def cache_exists(key: str) -> bool:
     """Check if a key exists in cache."""
     client = await RedisClient.get_client()
     return await client.exists(key) > 0
+
+
+def generate_cache_key(prefix: str, *args, **kwargs) -> str:
+    """Generate a cache key from prefix and arguments."""
+    key_data = json.dumps({"args": args, "kwargs": kwargs}, sort_keys=True, default=str)
+    key_hash = hashlib.md5(key_data.encode()).hexdigest()[:16]
+    return f"{prefix}:{key_hash}"
+
+
+def cached(prefix: str, ttl: int = CACHE_TTL_MEDIUM, skip_cache: bool = False):
+    """
+    Decorator to cache async function results in Redis.
+
+    Usage:
+        @cached("llm_response", ttl=CACHE_TTL_LONG)
+        async def generate_text(prompt: str) -> str:
+            ...
+    """
+    def decorator(func: Callable):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Skip cache if requested
+            if skip_cache or kwargs.pop("skip_cache", False):
+                return await func(*args, **kwargs)
+
+            # Generate cache key
+            cache_key = generate_cache_key(prefix, *args, **kwargs)
+
+            try:
+                # Try to get from cache
+                cached_value = await cache_get(cache_key)
+                if cached_value is not None:
+                    return cached_value
+            except Exception:
+                # If Redis fails, just run the function
+                pass
+
+            # Execute function
+            result = await func(*args, **kwargs)
+
+            try:
+                # Store in cache
+                await cache_set(cache_key, result, ttl=ttl)
+            except Exception:
+                # If Redis fails, still return the result
+                pass
+
+            return result
+        return wrapper
+    return decorator
+
+
+async def increment_rate_limit(key: str, window_seconds: int = 60) -> int:
+    """Increment rate limit counter and return current count."""
+    client = await RedisClient.get_client()
+    pipe = client.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, window_seconds)
+    results = await pipe.execute()
+    return results[0]
+
+
+async def check_rate_limit(key: str, limit: int, window_seconds: int = 60) -> tuple[bool, int]:
+    """
+    Check if rate limit is exceeded.
+    Returns (is_allowed, current_count).
+    """
+    current = await increment_rate_limit(key, window_seconds)
+    return current <= limit, current
+
+
+async def get_rate_limit_remaining(key: str, limit: int) -> int:
+    """Get remaining requests in rate limit window."""
+    client = await RedisClient.get_client()
+    current = await client.get(key)
+    if current is None:
+        return limit
+    return max(0, limit - int(current))

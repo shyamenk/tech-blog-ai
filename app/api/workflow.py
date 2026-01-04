@@ -1,11 +1,13 @@
 """Blog workflow API endpoints using LangGraph agent."""
 
 from typing import Optional
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.agents.blog_agent import run_blog_workflow
+from app.db.repositories import BlogPostRepository, ResearchSessionRepository
 
 router = APIRouter()
 
@@ -91,3 +93,105 @@ async def workflow_status() -> dict:
         "steps": ["research", "outline", "draft", "review", "optimize"],
         "description": "Multi-step AI workflow for complete blog post generation",
     }
+
+
+# ============== Blog Post Retrieval Endpoints ==============
+
+@router.get("/blogs")
+async def list_blog_posts(
+    status: Optional[str] = Query(None, description="Filter by status: draft, completed"),
+    niche: Optional[str] = Query(None, description="Filter by niche"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """List all saved blog posts from PostgreSQL."""
+    try:
+        posts = await BlogPostRepository.list_posts(
+            status=status,
+            niche=niche,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "posts": posts,
+            "count": len(posts),
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch posts: {str(e)}")
+
+
+@router.get("/blogs/{post_id}")
+async def get_blog_post(post_id: UUID) -> dict:
+    """Get a specific blog post by ID."""
+    try:
+        post = await BlogPostRepository.get_by_id(post_id)
+        if not post:
+            raise HTTPException(status_code=404, detail="Blog post not found")
+        return post
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch post: {str(e)}")
+
+
+@router.get("/blogs/slug/{slug}")
+async def get_blog_post_by_slug(slug: str) -> dict:
+    """Get a blog post by slug."""
+    try:
+        post = await BlogPostRepository.get_by_slug(slug)
+        if not post:
+            raise HTTPException(status_code=404, detail="Blog post not found")
+        return post
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch post: {str(e)}")
+
+
+@router.delete("/blogs/{post_id}")
+async def delete_blog_post(post_id: UUID) -> dict:
+    """Delete a blog post."""
+    try:
+        success = await BlogPostRepository.delete(post_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Blog post not found")
+        return {"id": str(post_id), "status": "deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete post: {str(e)}")
+
+
+# ============== Research Session Endpoints ==============
+
+@router.get("/research/{session_id}")
+async def get_research_session(session_id: UUID) -> dict:
+    """Get a research session by ID."""
+    try:
+        session = await ResearchSessionRepository.get_by_id(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Research session not found")
+        return session
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch session: {str(e)}")
+
+
+@router.get("/research/topic/{topic}")
+async def search_research_by_topic(
+    topic: str,
+    limit: int = Query(10, ge=1, le=50),
+) -> dict:
+    """Search research sessions by topic."""
+    try:
+        sessions = await ResearchSessionRepository.list_by_topic(topic, limit)
+        return {
+            "topic": topic,
+            "sessions": sessions,
+            "count": len(sessions),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search sessions: {str(e)}")

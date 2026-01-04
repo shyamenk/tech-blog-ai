@@ -1,7 +1,8 @@
-"""LLM Service for Google Gemini integration."""
+"""LLM Service for Google Gemini integration with Redis caching."""
 
 from typing import Optional, Any
 from functools import lru_cache
+import hashlib
 
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -9,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
 from app.config import get_settings
+from app.db.redis import cache_get, cache_set, CACHE_TTL_LONG, CACHE_TTL_DAY
 
 
 class LLMService:
@@ -37,13 +39,31 @@ class LLMService:
         self.str_parser = StrOutputParser()
         self.json_parser = JsonOutputParser()
 
+    def _generate_cache_key(self, prefix: str, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """Generate a cache key for LLM requests."""
+        key_data = f"{prompt}:{system_prompt or ''}"
+        key_hash = hashlib.md5(key_data.encode()).hexdigest()[:16]
+        return f"llm:{prefix}:{key_hash}"
+
     async def generate(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
+        use_cache: bool = True,
     ) -> str:
-        """Generate a response from the LLM."""
+        """Generate a response from the LLM with optional caching."""
+        # Try cache first (only for deterministic requests)
+        cache_key = None
+        if use_cache and temperature in (None, 0.7):
+            cache_key = self._generate_cache_key("gen", prompt, system_prompt)
+            try:
+                cached = await cache_get(cache_key)
+                if cached:
+                    return cached
+            except Exception:
+                pass  # Redis unavailable, continue without cache
+
         messages = []
 
         if system_prompt:
@@ -57,7 +77,16 @@ class LLMService:
             model = self.chat_model.bind(temperature=temperature)
 
         response = await model.ainvoke(messages)
-        return response.content
+        result = response.content
+
+        # Cache the result
+        if cache_key:
+            try:
+                await cache_set(cache_key, result, ttl=CACHE_TTL_LONG)
+            except Exception:
+                pass  # Redis unavailable, continue without caching
+
+        return result
 
     async def generate_with_template(
         self,
@@ -106,13 +135,36 @@ class LLMService:
         except json.JSONDecodeError:
             return {"raw_response": response}
 
-    async def embed_text(self, text: str) -> list[float]:
-        """Generate embeddings for a text."""
-        return await self.embeddings.aembed_query(text)
+    async def embed_text(self, text: str, use_cache: bool = True) -> list[float]:
+        """Generate embeddings for a text with optional caching."""
+        cache_key = None
+        if use_cache:
+            cache_key = self._generate_cache_key("emb", text)
+            try:
+                cached = await cache_get(cache_key)
+                if cached:
+                    return cached
+            except Exception:
+                pass
 
-    async def embed_documents(self, documents: list[str]) -> list[list[float]]:
-        """Generate embeddings for multiple documents."""
-        return await self.embeddings.aembed_documents(documents)
+        result = await self.embeddings.aembed_query(text)
+
+        if cache_key:
+            try:
+                await cache_set(cache_key, result, ttl=CACHE_TTL_DAY)
+            except Exception:
+                pass
+
+        return result
+
+    async def embed_documents(self, documents: list[str], use_cache: bool = True) -> list[list[float]]:
+        """Generate embeddings for multiple documents with optional caching."""
+        # For documents, we cache each individually
+        results = []
+        for doc in documents:
+            embedding = await self.embed_text(doc, use_cache=use_cache)
+            results.append(embedding)
+        return results
 
     def count_tokens(self, text: str) -> int:
         """Estimate token count for text."""

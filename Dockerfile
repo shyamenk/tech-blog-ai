@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install UV package manager
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:$PATH"
 
 # Copy dependency files
 COPY pyproject.toml requirements.txt ./

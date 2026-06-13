@@ -294,6 +294,7 @@ async def save_workflow_results(
     final_state: dict,
     niche: Optional[str] = None,
     target_audience: str = "intermediate",
+    user_id: Optional[UUID] = None,
 ) -> dict:
     """Save workflow results to PostgreSQL."""
     saved_ids = {}
@@ -305,6 +306,7 @@ async def save_workflow_results(
                 topic=topic,
                 findings=final_state["research_findings"],
                 sources=final_state["research_findings"].get("sources", []),
+                user_id=user_id,
             )
             saved_ids["research_session_id"] = str(research_result.get("id", ""))
         except Exception as e:
@@ -323,6 +325,7 @@ async def save_workflow_results(
                 word_count=content_data.get("word_count"),
                 seo_metadata=final_state.get("seo_metadata"),
                 status="completed" if final_state.get("status") == "completed" else "draft",
+                user_id=user_id,
             )
             saved_ids["blog_post_id"] = str(blog_result.get("id", ""))
             saved_ids["slug"] = blog_result.get("slug", "")
@@ -340,6 +343,7 @@ async def run_blog_workflow(
     tone: str = "conversational",
     include_code_examples: bool = True,
     save_to_db: bool = True,
+    user_id: Optional[UUID] = None,
 ) -> dict:
     """Run the complete blog creation workflow."""
 
@@ -386,6 +390,7 @@ async def run_blog_workflow(
             final_state=final_state,
             niche=niche,
             target_audience=target_audience,
+            user_id=user_id,
         )
         result["saved"] = saved_ids
 

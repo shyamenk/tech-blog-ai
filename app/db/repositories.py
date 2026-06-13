@@ -294,3 +294,50 @@ class WorkflowRunRepository:
         query = "SELECT * FROM workflow_runs WHERE id = $1"
         row = await fetch_one(query, run_id)
         return dict(row) if row else None
+
+
+class UserRepository:
+    """Repository for user operations."""
+
+    @staticmethod
+    async def create(
+        email: str,
+        password_hash: str,
+        name: Optional[str] = None,
+    ) -> dict:
+        """Create a new user."""
+        query = """
+            INSERT INTO users (email, password_hash, name)
+            VALUES ($1, $2, $3)
+            RETURNING id, email, name, created_at
+        """
+        row = await fetch_one(query, email, password_hash, name)
+        return dict(row) if row else {}
+
+    @staticmethod
+    async def get_by_email(email: str) -> Optional[dict]:
+        """Get a user by email."""
+        query = "SELECT * FROM users WHERE email = $1"
+        row = await fetch_one(query, email)
+        return dict(row) if row else None
+
+    @staticmethod
+    async def get_by_id(user_id: UUID) -> Optional[dict]:
+        """Get a user by ID."""
+        query = "SELECT id, email, name, created_at, updated_at FROM users WHERE id = $1"
+        row = await fetch_one(query, user_id)
+        return dict(row) if row else None
+
+    @staticmethod
+    async def update_password(user_id: UUID, password_hash: str) -> bool:
+        """Update user password."""
+        query = "UPDATE users SET password_hash = $1 WHERE id = $2"
+        result = await execute_query(query, password_hash, user_id)
+        return "UPDATE 1" in result
+
+    @staticmethod
+    async def email_exists(email: str) -> bool:
+        """Check if email already exists."""
+        query = "SELECT 1 FROM users WHERE email = $1"
+        row = await fetch_one(query, email)
+        return row is not None

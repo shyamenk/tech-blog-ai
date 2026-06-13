@@ -3,10 +3,11 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.agents.blog_agent import run_blog_workflow
+from app.api.deps import get_current_user, get_current_user_optional
 from app.db.repositories import BlogPostRepository, ResearchSessionRepository
 
 router = APIRouter()
@@ -42,9 +43,14 @@ class BlogWorkflowResponse(BaseModel):
 
 
 @router.post("/workflow/blog", response_model=BlogWorkflowResponse)
-async def create_blog_post(request: BlogWorkflowRequest) -> BlogWorkflowResponse:
+async def create_blog_post(
+    request: BlogWorkflowRequest,
+    current_user: dict = Depends(get_current_user),
+) -> BlogWorkflowResponse:
     """
     Create a complete blog post using the LangGraph workflow.
+
+    Requires authentication.
 
     This endpoint runs a multi-step AI workflow:
     1. Research - Gathers information about the topic
@@ -63,6 +69,7 @@ async def create_blog_post(request: BlogWorkflowRequest) -> BlogWorkflowResponse
             word_count=request.word_count,
             tone=request.tone,
             include_code_examples=request.include_code_examples,
+            user_id=current_user["id"],
         )
 
         return BlogWorkflowResponse(
